@@ -50,8 +50,15 @@
             background: #000;
             border-radius: 10px;
             overflow: hidden;
-            margin-bottom: 20px;
+            margin-bottom: 15px;
+            transition: aspect-ratio 0.3s ease;
         }
+
+        .viewfinder.ratio-1-1 { aspect-ratio: 1/1; }
+        .viewfinder.ratio-4-3 { aspect-ratio: 4/3; }
+        .viewfinder.ratio-16-9 { aspect-ratio: 16/9; }
+        .viewfinder.ratio-9-16 { aspect-ratio: 9/16; }
+        .viewfinder.ratio-3-4 { aspect-ratio: 3/4; }
 
         #video {
             width: 100%;
@@ -100,9 +107,36 @@
         .filters {
             display: flex;
             gap: 8px;
+            margin-bottom: 10px;
+            overflow-x: auto;
+            padding: 5px 0;
+        }
+
+        .ratios {
+            display: flex;
+            gap: 8px;
             margin-bottom: 15px;
             overflow-x: auto;
             padding: 5px 0;
+        }
+
+        .ratio-btn {
+            background: white;
+            border: 2px solid #ddd;
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-size: 14px;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 0.2s;
+            color: #333;
+            font-weight: 500;
+        }
+
+        .ratio-btn.active {
+            background: #764ba2;
+            color: white;
+            border-color: #764ba2;
         }
 
         .filter-btn {
@@ -203,7 +237,6 @@
         .polaroid img {
             width: 100%;
             display: block;
-            aspect-ratio: 1;
             object-fit: cover;
         }
 
@@ -259,9 +292,17 @@
         <h1>📷</h1>
         
         <div class="camera-container">
-            <div class="viewfinder">
+            <div class="viewfinder ratio-1-1" id="viewfinder">
                 <video id="video" autoplay playsinline></video>
                 <div class="flash" id="flash"></div>
+            </div>
+
+            <div class="ratios">
+                <button class="ratio-btn active" data-ratio="1-1">1:1</button>
+                <button class="ratio-btn" data-ratio="4-3">4:3</button>
+                <button class="ratio-btn" data-ratio="16-9">16:9</button>
+                <button class="ratio-btn" data-ratio="3-4">3:4</button>
+                <button class="ratio-btn" data-ratio="9-16">9:16</button>
             </div>
 
             <div class="filters">
@@ -299,11 +340,24 @@
         const flash = document.getElementById('flash');
         const errorDiv = document.getElementById('error');
         const filterBtns = document.querySelectorAll('.filter-btn');
+        const ratioBtns = document.querySelectorAll('.ratio-btn');
+        const viewfinder = document.getElementById('viewfinder');
         
         let currentStream = null;
         let facingMode = 'user';
         let photos = [];
         let currentFilter = 'none';
+        let currentRatio = '1-1';
+
+        // Ratio button handlers
+        ratioBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                ratioBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentRatio = btn.dataset.ratio;
+                viewfinder.className = `viewfinder ratio-${currentRatio}`;
+            });
+        });
 
         // Filter button handlers
         filterBtns.forEach(btn => {
@@ -392,23 +446,24 @@
         function createPolaroidImage(imageCanvas, date) {
             const padding = 40;
             const bottomPadding = 120;
-            const imgSize = imageCanvas.width;
+            const imgWidth = imageCanvas.width;
+            const imgHeight = imageCanvas.height;
             
-            polaroidCanvas.width = imgSize + (padding * 2);
-            polaroidCanvas.height = imgSize + padding + bottomPadding;
+            polaroidCanvas.width = imgWidth + (padding * 2);
+            polaroidCanvas.height = imgHeight + padding + bottomPadding;
             
             // White background
             polaroidCtx.fillStyle = 'white';
             polaroidCtx.fillRect(0, 0, polaroidCanvas.width, polaroidCanvas.height);
             
-            // Draw image
-            polaroidCtx.drawImage(imageCanvas, padding, padding, imgSize, imgSize);
+            // Draw image with correct dimensions
+            polaroidCtx.drawImage(imageCanvas, padding, padding, imgWidth, imgHeight);
             
             // Add date text
             polaroidCtx.fillStyle = '#666';
             polaroidCtx.font = '24px "Courier New", monospace';
             polaroidCtx.textAlign = 'center';
-            polaroidCtx.fillText(date, polaroidCanvas.width / 2, imgSize + padding + 70);
+            polaroidCtx.fillText(date, polaroidCanvas.width / 2, imgHeight + padding + 70);
             
             return polaroidCanvas.toDataURL('image/jpeg', 0.95);
         }
@@ -418,12 +473,45 @@
             flash.classList.add('active');
             setTimeout(() => flash.classList.remove('active'), 100);
 
-            // Set canvas size to match video
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
+            // Calculate dimensions based on ratio
+            const videoAspect = video.videoWidth / video.videoHeight;
+            const ratioMap = {
+                '1-1': 1,
+                '4-3': 4/3,
+                '16-9': 16/9,
+                '3-4': 3/4,
+                '9-16': 9/16
+            };
+            const targetAspect = ratioMap[currentRatio];
 
-            // Draw video frame
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            let sourceWidth, sourceHeight, sourceX, sourceY;
+
+            if (videoAspect > targetAspect) {
+                // Video is wider, crop width
+                sourceHeight = video.videoHeight;
+                sourceWidth = sourceHeight * targetAspect;
+                sourceX = (video.videoWidth - sourceWidth) / 2;
+                sourceY = 0;
+            } else {
+                // Video is taller, crop height
+                sourceWidth = video.videoWidth;
+                sourceHeight = sourceWidth / targetAspect;
+                sourceX = 0;
+                sourceY = (video.videoHeight - sourceHeight) / 2;
+            }
+
+            // Set canvas to match the target aspect ratio
+            const maxDimension = 1080;
+            if (targetAspect >= 1) {
+                canvas.width = maxDimension;
+                canvas.height = maxDimension / targetAspect;
+            } else {
+                canvas.height = maxDimension;
+                canvas.width = maxDimension * targetAspect;
+            }
+
+            // Draw cropped video frame
+            ctx.drawImage(video, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
 
             // Apply filter
             if (currentFilter !== 'none') {
